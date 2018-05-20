@@ -1,8 +1,26 @@
+from bs4 import BeautifulSoup
+from selenium import webdriver
 from PIL import Image,ImageDraw
 from PIL import ImageFilter
 import time
 import os
+import io
 import math
+import queue
+import threading
+import requests
+
+
+mask_scale = 50
+
+SCROLL_PAUSE_TIME = 0.2
+driver = webdriver.Firefox()
+url = "https://pixabay.com/zh/photos/?cat=nature&pagi="
+page = 0
+mqueue = queue.Queue()
+lqueue = queue.Queue()
+pro_que = queue.Queue()
+
 
 def to_gray(mlist):
     total = 0.0
@@ -36,15 +54,21 @@ def draw_avg_color(img,X,Y,scale):
     return img, avg_color
 
 def draw_mask(img, scale):
-    ori_width = img.size[0]
-    ori_height = img.size[1]
+    ori_width, ori_height = img.size
+    print(ori_width, ori_height)
+    total = (ori_height/scale) ** 2
     img_arr=[]
     img2 = img.copy()
+    print(total)
+    print()
     for y in range(0, ori_height, scale):
         for x in range(0, ori_width, scale):
             img2, avg_color = draw_avg_color(img2,x,y,scale)
+            mqueue.put((x,y),avg_color)
             img_arr.append([(x,y),avg_color])
-    
+            print("{}%".format(round(float(len(img_arr)/total)*100,2)), end = "\r")
+    print
+    print("done")
     return img2,img_arr
 
 def calc_color_avg(img):
@@ -95,12 +119,16 @@ def is_color_alike(clr1,clr2):
     # print(abs(g1-g2) < arg)
     return (abs(r1-r2) < arg and abs(g1-g2) < arg and abs(b1-b2) <  arg)
 
+def get_color(imgdir):
+    k=imgdir.split('/')[-1].split('-')[0].split(',')
+    return tuple([int(i) for i in k])
 
-def main():
-    mask_scale = 25
-    
+
+def mother_pic_init():
+    print("init mother pic")
     ## get mother pic 
-    mother_pic = Image.open('./pic/total/P_20160116_193613_BF.jpg')
+    # mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
+    mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
     w, h = mother_pic.size
     if w > h:
         mother_pic=resize_imgae(mother_pic, w)
@@ -110,43 +138,158 @@ def main():
         length = h
     
     ## analize the color 要拿到打馬後的整張顏色結構 list 存
+    print("start analize....")
     mother_pic, mother_pic_struct = draw_mask(mother_pic, mask_scale)
-    print(len(mother_pic_struct))
-    mother_pic.show('test')
-    # print(mother_pic_struct)
+    mother_pic.save('ori_blur.jpg')
+
+    return mother_pic_struct, length
+
+
+def img_process():
+    while True:
+        if pro_que.empty():
+            pass
+        else:
+            try:
+                imgurl = pro_que.get()
+                img = requests.get(imgurl)
+                img = Image.open(io.BytesIO(img.content))
+                img = resize_imgae(img, mask_scale)
+                avg_color = calc_color_avg(img)
+                lqueue.put((img, avg_color))
+                print("pro_queue size: {}, lqueue size: {}".format(pro_que.qsize(),lqueue.qsize()))
+            except:
+                pass
+        
+
+
+def crawl(page, threads):
+    print("Page:",page)
+    driver.get(url+ str(page))
+    last_height = driver.execute_script("return window.scrollY")
+    print("load page")
+    while True:
+        # Scroll down
+        driver.execute_script("window.scrollBy(0, screen.height);")
+
+        # Wait to load page
+        time.sleep(SCROLL_PAUSE_TIME)
+        
+        # Calculate new scroll height and compare with last scroll height
+        new_height = driver.execute_script("return window.scrollY")
+        print(last_height,new_height)
+        if new_height == last_height:
+            break
+        last_height = new_height
+
+    html = driver.page_source
+    soup = BeautifulSoup(html, 'html5lib')
+    imglistdiv = soup.findAll("div", {"class": "item"})
+    for img in imglistdiv:
+        imgurl = img.find('img')['src']
+        pro_que.put(imgurl)
+    
+    
+
+    
+
+
+def thread_crawl():
+    global page
+    worker = 20
+    threads = []
+    for i in range(worker):
+        t2 = threading.Thread(target=img_process)
+        t2.daemon = True
+        threads.append(t2)
+    print("thread start")
+    for t in threads:
+        t.start()
+    while True:
+        if lqueue.qsize() > 1000:
+            print("crawl rest...")
+            time.sleep(5)
+        page += 1
+        crawl(page,threads)
+
+        while pro_que.qsize() > 30:
+            time.sleep(10)
+        
+    
+
+def main():
     ## initial result img
+    mother_pic_struct, length = mother_pic_init()
+    ## init result img   
     result_img = Image.new('RGB',(length,length))
+    
+  
+    ## start threading crawling
 
-    
-    
+    t = threading.Thread(target = thread_crawl )
+    t.daemon = True
+    t.start()
 
-    
-    
+
+    ## start merging
+    result_stage = 1
+
+    while len(mother_pic_struct) > 0:
+        if lqueue.qsize() == 0:
+            print("wait crawl..")
+            time.sleep(10)
+        else:
+            limg_struct = lqueue.get()
+            limg, l_color = limg_struct
+            for m_piece in mother_pic_struct:
+                m_point, m_color = m_piece
+                
+                if is_color_alike(m_color, l_color):
+                    result_img.paste(limg,(m_point[0], m_point[1], m_point[0] + mask_scale, m_point[1]+mask_scale))
+                    mother_pic_struct.remove(m_piece)
+                    print("{} left".format(len(mother_pic_struct)))
+                    
+                    if len(mother_pic_struct) % 50 == 0:
+                        result_img.save("pic/stage/result_{}.jpg".format(str(result_stage)))
+                        result_stage += 1
+
+                    break
+    print("Done")
+    driver.close()
+
+
     ## for each matiral calc the avg color
         ## and mapping to the mother pic
-    mlist = list_all_img('../pic_crawler/pic/')
-    print("0% complete",end = "\r")
-    for i,m_mask in enumerate(mother_pic_struct):
-        point, color = m_mask
-        is_match = False
-        for imgdir in mlist:
-            limg = Image.open(imgdir,'r')
-            limg = resize_imgae(limg, mask_scale)
-            try:
-                avg_color = calc_color_avg(limg)
-            except:
-                print("ERROR",imgdir)
-                continue
-            if is_color_alike(avg_color, color):
-                result_img.paste(limg,(point[0], point[1], point[0] + mask_scale, point[1]+mask_scale))
-                # mlist.remove(imgdir)
-                print("{}% complete".format(float(i/len(mother_pic_struct))), end="\r")
-                is_match = True
-                # result_img.show('test')
-                break
-        if is_match == False:
-            result_img.show('title')
-            raise('Not match')
+    # mlist = list_all_img('./pic/total/')
+    # print("0% complete",end = "\r")
+    # for i,m_mask in enumerate(mother_pic_struct):
+    #     point, color = m_mask
+    #     is_match = False
+    #     for imgdir in mlist:
+    #         # limg = Image.open(imgdir,'r')
+    #         # limg = resize_imgae(limg, mask_scale)
+    #         try:
+    #             # avg_color = calc_color_avg(limg)
+    #             avg_color = get_color(imgdir)
+    #         except:
+    #             print("ERROR",imgdir)
+    #             continue
+    #         if is_color_alike(avg_color, color):
+    #             try:
+    #                 limg = Image.open(imgdir,'r')
+    #                 result_img.paste(limg,(point[0], point[1], point[0] + mask_scale, point[1]+mask_scale))
+    #                 # mlist.remove(imgdir)
+    #                 print("{}% complete".format(float(i/len(mother_pic_struct))), end="\r")
+    #                 is_match = True
+    #                 # result_img.show('test')
+    #                 break
+    #             except:
+    #                 mlist.remove(imgdir)
+    #                 pass
+    #     if is_match == False:
+    #         result_img.show('title')
+    #         result_img.save("pic/result.jpg")
+    #         raise('Not match')
         
     result_img.save("pic/result.jpg")
     
@@ -180,12 +323,8 @@ def main():
     
     
 def test():
-    mask_scale = 25
-    # print(is_color_alike((20,50,60),(15,48,61)))
-    imgdir = '../pic_crawler/pic/moon-3232487__340.jpg'
-    limg = Image.open(imgdir,'r')
-    limg = resize_imgae(limg, mask_scale)
-    avg_color = calc_color_avg(limg)
+    imgdir = './pic/total/63,62,60-9775.jpg'
+    get_color(imgdir)
     
 
 if __name__ == '__main__':
