@@ -157,7 +157,7 @@ def img_process():
                 img = resize_imgae(img, mask_scale)
                 avg_color = calc_color_avg(img)
                 lqueue.put((img, avg_color))
-                print("pro_queue size: {}, lqueue size: {}".format(pro_que.qsize(),lqueue.qsize()))
+                # print("pro_queue size: {}, lqueue size: {}".format(pro_que.qsize(),lqueue.qsize()))
             except:
                 pass
         
@@ -167,7 +167,7 @@ def crawl(page, threads):
     print("Page:",page)
     driver.get(url+ str(page))
     last_height = driver.execute_script("return window.scrollY")
-    print("load page")
+    # print("load page")
     while True:
         # Scroll down
         driver.execute_script("window.scrollBy(0, screen.height);")
@@ -177,7 +177,7 @@ def crawl(page, threads):
         
         # Calculate new scroll height and compare with last scroll height
         new_height = driver.execute_script("return window.scrollY")
-        print(last_height,new_height)
+        # print(last_height,new_height)
         if new_height == last_height:
             break
         last_height = new_height
@@ -210,6 +210,8 @@ def thread_crawl():
             print("crawl rest...")
             time.sleep(5)
         page += 1
+        if page > 2580:
+            page = 1
         crawl(page,threads)
 
         while pro_que.qsize() > 30:
