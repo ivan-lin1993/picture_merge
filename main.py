@@ -9,9 +9,9 @@ import math
 import queue
 import threading
 import requests
+import json
 
-
-mask_scale = 50
+mask_scale = 30
 
 SCROLL_PAUSE_TIME = 0.2
 driver = webdriver.Firefox()
@@ -128,7 +128,7 @@ def mother_pic_init():
     print("init mother pic")
     ## get mother pic 
     # mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
-    mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
+    mother_pic = Image.open('./pic/IMAG40802.jpg')
     w, h = mother_pic.size
     if w > h:
         mother_pic=resize_imgae(mother_pic, w)
@@ -214,8 +214,8 @@ def thread_crawl():
             page = 1
         crawl(page,threads)
 
-        while pro_que.qsize() > 30:
-            time.sleep(10)
+        # while pro_que.qsize() > 30:
+        #     time.sleep(10)
         
     
 
@@ -251,8 +251,11 @@ def main():
                     mother_pic_struct.remove(m_piece)
                     print("{} left".format(len(mother_pic_struct)))
                     
+                    
                     if len(mother_pic_struct) % 50 == 0:
                         result_img.save("pic/stage/result_{}.jpg".format(str(result_stage)))
+                        with open('record','w') as record:
+                            record.write(json.dumps(mother_pic_struct))
                         result_stage += 1
 
                     break
@@ -327,12 +330,14 @@ def main():
 def test():
     imgdir = './pic/total/63,62,60-9775.jpg'
     get_color(imgdir)
+    mother_pic_struct, length = mother_pic_init()
+    print(json.dumps(mother_pic_struct))
+
     
 
 if __name__ == '__main__':
     starttime = time.time()
     main()
-    # test()
     endtime = time.time()
     print(starttime,endtime)
     print(endtime-starttime)
