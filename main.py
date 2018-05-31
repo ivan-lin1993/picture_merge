@@ -1,21 +1,30 @@
-from bs4 import BeautifulSoup
-from selenium import webdriver
-from PIL import Image,ImageDraw
-from PIL import ImageFilter
-import time
-import os
 import io
+import json
 import math
+import os
 import queue
 import threading
-import requests
-import json
+import time
 
-mask_scale = 30
+import requests
+from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw, ImageFilter
+
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+nscale = 120
+mask_scale = 20
+past_size = 10
 
 SCROLL_PAUSE_TIME = 0.2
-driver = webdriver.Firefox()
-url = "https://pixabay.com/zh/photos/?cat=nature&pagi="
+binary = FirefoxBinary(r'C:\Program Files\Mozilla Firefox\firefox.exe')
+driver = webdriver.Firefox(firefox_binary=binary, executable_path='geckodriver.exe')
+url = "https://pixabay.com/zh/photos/?q=nature&hp=&image_type=&order=&cat=&min_width=&min_height=&pagi="
+# url = "https://www.pexels.com/search/nature/"
 page = 0
 mqueue = queue.Queue()
 lqueue = queue.Queue()
@@ -27,6 +36,34 @@ def to_gray(mlist):
     for i in mlist:
         total += i
     return tuple([int(total/3)] * 3)
+
+
+def draw_avg_color2(srcimg,resimg,X,Y,scale,nscale):
+    total = (0,0,0)
+    point_list=[]
+    for y in range(Y,Y+scale):
+        if y >= srcimg.size[1]:
+            pass
+        else:
+            for x in range(X,X+scale):
+                if x >= srcimg.size[0]:
+                    pass
+                else:
+                    pixel = srcimg.getpixel((x,y))
+                    total = (
+                        total[0]+pixel[0],
+                        total[1]+pixel[1],
+                        total[2]+pixel[2],
+                    )
+                    point_list.append((x,y))
+    m_sum = scale * scale
+    avg_color = ( int(total[0]/ m_sum),int(total[1]/ m_sum),int(total[2]/ m_sum))
+    fill_img = Image.new("RGB",(nscale,nscale),avg_color)
+    # resimg.putpixel((int(X/scale),int(Y/scale)), avg_color)
+    X = int((X/scale)) * nscale
+    Y = int((Y/scale)) * nscale
+    resimg.paste(fill_img,(X,Y,X+nscale,Y+nscale))
+    return resimg, avg_color
 
 
 def draw_avg_color(img,X,Y,scale):
@@ -55,20 +92,26 @@ def draw_avg_color(img,X,Y,scale):
 
 def draw_mask(img, scale):
     ori_width, ori_height = img.size
-    print(ori_width, ori_height)
     total = (ori_height/scale) ** 2
     img_arr=[]
-    img2 = img.copy()
-    print(total)
+    img2 = Image.new('RGB',(int(ori_width/scale) * nscale, int(ori_height/scale) * nscale))
     print()
+    # for y in range(0, ori_height, scale):
+    #     for x in range(0, ori_width, scale):
+    #         img2, avg_color = draw_avg_color(img2,x,y,scale)
+    #         mqueue.put((x,y),avg_color)
+    #         img_arr.append([(x,y),avg_color])
+    #         print("{}%".format(round(float(len(img_arr)/total)*100,2)), end = "\r")
     for y in range(0, ori_height, scale):
         for x in range(0, ori_width, scale):
-            img2, avg_color = draw_avg_color(img2,x,y,scale)
-            mqueue.put((x,y),avg_color)
-            img_arr.append([(x,y),avg_color])
+            img2, avg_color = draw_avg_color2(img,img2,x,y,scale,nscale)
+            # mqueue.put((x,y),avg_color)
+            img_arr.append([(int(x/scale),int(y/scale)),avg_color])
             print("{}%".format(round(float(len(img_arr)/total)*100,2)), end = "\r")
     print
     print("done")
+    with open('record','w') as record:
+        record.write(json.dumps(img_arr))
     return img2,img_arr
 
 def calc_color_avg(img):
@@ -128,21 +171,21 @@ def mother_pic_init():
     print("init mother pic")
     ## get mother pic 
     # mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
-    mother_pic = Image.open('./pic/IMAG40802.jpg')
+    mother_pic = Image.open('./pic/resize3.jpg')
     w, h = mother_pic.size
-    if w > h:
-        mother_pic=resize_imgae(mother_pic, w)
-        length = w
-    else:
-        mother_pic=resize_imgae(mother_pic, h)
-        length = h
+    # if w > h:
+    #     mother_pic=resize_imgae(mother_pic, w)
+    #     length = w
+    # else:
+    #     mother_pic=resize_imgae(mother_pic, h)
+    #     length = h
     
     ## analize the color 要拿到打馬後的整張顏色結構 list 存
     print("start analize....")
     mother_pic, mother_pic_struct = draw_mask(mother_pic, mask_scale)
     mother_pic.save('ori_blur.jpg')
 
-    return mother_pic_struct, length
+    return mother_pic_struct, [w,h]
 
 
 def img_process():
@@ -154,8 +197,9 @@ def img_process():
                 imgurl = pro_que.get()
                 img = requests.get(imgurl)
                 img = Image.open(io.BytesIO(img.content))
-                img = resize_imgae(img, mask_scale)
-                avg_color = calc_color_avg(img)
+                img = resize_imgae(img,nscale)
+                imgtemp = resize_imgae(img, 50)
+                avg_color = calc_color_avg(imgtemp)
                 lqueue.put((img, avg_color))
                 # print("pro_queue size: {}, lqueue size: {}".format(pro_que.qsize(),lqueue.qsize()))
             except:
@@ -190,8 +234,52 @@ def crawl(page, threads):
         pro_que.put(imgurl)
     
     
+def crawl2():
+    driver.get(url)
+    last_height = driver.execute_script("return window.scrollY")
+    print("load page")
+    wait_count = 0
+    while True:
+        # Scroll down
+        driver.execute_script("window.scrollBy(0, screen.height);")
 
-    
+        # Wait to load page
+        time.sleep(SCROLL_PAUSE_TIME)
+        
+        # Calculate new scroll height and compare with last scroll height
+        new_height = driver.execute_script("return window.scrollY")
+        print(last_height,new_height)
+        if new_height == last_height:
+            try:
+                element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "js-loading"))
+                )
+            finally:
+                pass
+        last_height = new_height
+        imglistdiv = driver.find_elements_by_class_name("photo-item__img")
+        
+        for imgdiv in imglistdiv:
+            imgurl = imgdiv.get_attribute('src')
+            pro_que.put(imgurl)
+        driver.execute_script("var mlist = document.getElementsByClassName('photo-item__img'); for(var i=0;i<mlist.length;i+=1){mlist[i].className='done';}")
+    # imglistdiv = driver.find_elements_by_class_name("photo-item__img")
+
+def thread_crawl2():
+    worker = 20
+    threads = []
+    for i in range(worker):
+        t2 = threading.Thread(target=img_process)
+        t2.daemon = True
+        threads.append(t2)
+    print("thread start")
+    for t in threads:
+        t.start()
+    while True:
+        if lqueue.qsize() > 1000 or pro_que.qsize() > 200:
+            print("crawl rest...")
+            time.sleep(5)
+        crawl2()
 
 
 def thread_crawl():
@@ -206,11 +294,11 @@ def thread_crawl():
     for t in threads:
         t.start()
     while True:
-        if lqueue.qsize() > 1000:
+        if lqueue.qsize() > 1000 or pro_que.qsize() > 200:
             print("crawl rest...")
             time.sleep(5)
         page += 1
-        if page > 2580:
+        if page > 3300:
             page = 1
         crawl(page,threads)
 
@@ -221,9 +309,11 @@ def thread_crawl():
 
 def main():
     ## initial result img
-    mother_pic_struct, length = mother_pic_init()
+    mother_pic_struct, size = mother_pic_init()
+    w_len = int((size[0] / mask_scale) * nscale)
+    h_len = int((size[1] / mask_scale) * nscale)
     ## init result img   
-    result_img = Image.new('RGB',(length,length))
+    result_img = Image.new('RGB',(w_len,h_len))
     
   
     ## start threading crawling
@@ -237,9 +327,10 @@ def main():
     result_stage = 1
 
     while len(mother_pic_struct) > 0:
+        print("lqueue: {}".format(str(lqueue.qsize())))
         if lqueue.qsize() == 0:
             print("wait crawl..")
-            time.sleep(10)
+            time.sleep(5)
         else:
             limg_struct = lqueue.get()
             limg, l_color = limg_struct
@@ -247,19 +338,21 @@ def main():
                 m_point, m_color = m_piece
                 
                 if is_color_alike(m_color, l_color):
-                    result_img.paste(limg,(m_point[0], m_point[1], m_point[0] + mask_scale, m_point[1]+mask_scale))
+                    result_img.paste(limg,(m_point[0]*nscale, m_point[1]*nscale, m_point[0]*nscale + nscale, m_point[1]*nscale + nscale))
                     mother_pic_struct.remove(m_piece)
                     print("{} left".format(len(mother_pic_struct)))
                     
                     
-                    if len(mother_pic_struct) % 50 == 0:
+                    if len(mother_pic_struct) % 100 == 0:
                         result_img.save("pic/stage/result_{}.jpg".format(str(result_stage)))
                         with open('record','w') as record:
                             record.write(json.dumps(mother_pic_struct))
                         result_stage += 1
 
                     break
+    
     print("Done")
+    result_img.save("pic/result.jpg")
     driver.close()
 
 
@@ -296,7 +389,7 @@ def main():
     #         result_img.save("pic/result.jpg")
     #         raise('Not match')
         
-    result_img.save("pic/result.jpg")
+    
     
     
     # all_images = list_all_img('pic/total/')
@@ -341,7 +434,3 @@ if __name__ == '__main__':
     endtime = time.time()
     print(starttime,endtime)
     print(endtime-starttime)
-
-
-
-

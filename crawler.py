@@ -1,16 +1,22 @@
-from PIL import Image,ImageDraw
-from bs4 import BeautifulSoup
-from selenium import webdriver
-import requests
-import time
-import threading
 import io
 import random
+import threading
+import time
 
+import requests
+from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw
+
+from selenium import webdriver
+from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 SCROLL_PAUSE_TIME = 0.2
-driver = webdriver.Firefox()
-url = "https://pixabay.com/zh/photos/?cat=nature&pagi="
+binary = FirefoxBinary(r'C:\Program Files\Mozilla Firefox\firefox.exe')
+driver = webdriver.Firefox(firefox_binary=binary, executable_path='geckodriver.exe')
+url = "https://www.pexels.com/search/sea/"
 size = 25
 
 def calc_color_avg(img):
@@ -47,6 +53,7 @@ def download_img(imgurl):
 def load_page(page):
     last_height = driver.execute_script("return window.scrollY")
     print("load page")
+    wait_count = 0
     while True:
         # Scroll down
         driver.execute_script("window.scrollBy(0, screen.height);")
@@ -58,28 +65,43 @@ def load_page(page):
         new_height = driver.execute_script("return window.scrollY")
         print(last_height,new_height)
         if new_height == last_height:
-            break
+            try:
+                element = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CLASS_NAME, "js-loading"))
+                )
+            finally:
+                break
+        #     wait_count += 1
+        #     if wait_count > 10:
+        #         break
+        #     else:
+        #         time.sleep(0.4)
+        # else:
+        #     wait_count = 0
         last_height = new_height
+        imglistdiv = driver.find_elements_by_class_name("photo-item__img")
+        if len(imglistdiv) > 80:
+            driver.execute_script("var mlist = document.getElementsByClassName('photo-item__img'); for(var i=0;i<mlist.length;i+=1){mlist[i].className='done';}")
+    time.sleep(5)
+    # imglistdiv = driver.find_elements_by_class_name("photo-item__img")
 
-    html = driver.page_source
-    soup = BeautifulSoup(html, 'html5lib')
-    imglistdiv = soup.findAll("div", {"class": "item"})
     print(len(imglistdiv))
-
-    for img in imglistdiv:
-        imgurl = img.find('img')['src']
-        # print(imgurl)
-        threading._start_new_thread(download_img,(imgurl,))
+    
+    
+    # for img in imglistdiv:
+    #     imgurl = img['src']
+    #     # print(imgurl)
+    #     threading._start_new_thread(download_img,(imgurl,))
         # download_img(imgurl)
 
 def main():
     page = 1
 
-    while True:
-        driver.get(url+ str(page))
-        load_page(page)
-        page += 1
-        time.sleep(1)
+    # while True:
+    driver.get(url)
+    load_page(page)
+    page += 1
+    time.sleep(1)
 
 def test():
     res = requests.get('https://cdn.pixabay.com/photo/2018/05/13/01/39/fantasy-3395135__340.jpg')
@@ -93,4 +115,3 @@ def test():
 if __name__ == '__main__':
     main()
     # test()
-    
