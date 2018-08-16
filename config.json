@@ -1,0 +1,5 @@
+{
+    "nscale": 120,
+    "mask_scale": 20,
+    "past_size": 10
+}

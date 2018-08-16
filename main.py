@@ -5,6 +5,8 @@ import os
 import queue
 import threading
 import time
+import sys
+import getopt
 
 import requests
 from bs4 import BeautifulSoup
@@ -16,12 +18,9 @@ from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-nscale = 120
-mask_scale = 20
-past_size = 10
 
 SCROLL_PAUSE_TIME = 0.2
-binary = FirefoxBinary(r'C:\Program Files\Mozilla Firefox\firefox.exe')
+binary = FirefoxBinary(r'C:\Program Files (x86)\Mozilla Firefox\firefox.exe')
 driver = webdriver.Firefox(firefox_binary=binary, executable_path='geckodriver.exe')
 url = "https://pixabay.com/zh/photos/?q=nature&hp=&image_type=&order=&cat=&min_width=&min_height=&pagi="
 # url = "https://www.pexels.com/search/nature/"
@@ -29,6 +28,79 @@ page = 0
 mqueue = queue.Queue()
 lqueue = queue.Queue()
 pro_que = queue.Queue()
+
+class Merge_Pic():
+    def __init__(self, origin_path, halfwork_path= None, record_path=None):
+        self.origin_path = origin_path
+        self.halfwork_path = halfwork_path
+        self.record_path = record_path
+        
+        if origin_path is not None:
+            self.is_half_work = False
+            self.pic_name = self.origin_path.split('/')[-1].split('.')[0]
+            print(origin_path)
+            print(self.pic_name)
+        else:
+            self.is_half_work = True
+            self.pic_name = self.halfwork_path.split('/')[-1].split('.')[0]
+        try:
+            config = open('config.json','r')
+            content = config.read()
+            obj = json.loads(content)
+            self.nscale = obj['nscale']
+            self.mask_scale = obj['mask_scale']
+            self.past_size = obj['past_size']
+        except:
+            print("Not Exists Config")
+            print("Creating default config...")
+            config = open('config.json','w')
+            obj = {
+                "nscale" : 120,
+                "mask_scale" : 20,
+                "past_size" : 10
+            }
+            self.nscale = 120
+            self.mask_scale = 20
+            self.past_size = 10
+            config.write(json.dumps(obj))
+        config.close()
+
+
+    def mother_pic_init(self):
+        print("init mother pic")
+        if self.is_half_work is True:
+            half_img = Image.open(self.halfwork_path,'r')
+            w,h = half_img.size
+            savefile = open(self.record_path,'r').read()
+            rest_struct = json.loads(savefile)
+            mother_pic_struct = []
+            for rest_piece in rest_struct:
+                mother_pic_struct.append(
+                    [tuple(rest_piece[0]),tuple(rest_piece[1])]
+                )
+            result_img = half_img
+        else:
+            ## get mother pic 
+            mother_pic = Image.open(self.origin_path)
+            w, h = mother_pic.size
+            # if w > h:
+            #     mother_pic=resize_imgae(mother_pic, w)
+            #     length = w
+            # else:
+            #     mother_pic=resize_imgae(mother_pic, h)
+            #     length = h
+            
+            ## analize the color 要拿到打馬後的整張顏色結構 list 存
+            print("start analize....")
+            mother_pic, mother_pic_struct = draw_mask(mother_pic, self.mask_scale , self.nscale)
+            
+            mother_pic.save('ori_blur.jpg')
+            w_len = int((w / mp.mask_scale) * mp.nscale)
+            h_len = int((h / mp.mask_scale) * mp.nscale)
+            result_img = Image.new('RGB',(w_len,h_len))
+
+
+        return result_img, mother_pic_struct
 
 
 def to_gray(mlist):
@@ -90,12 +162,11 @@ def draw_avg_color(img,X,Y,scale):
         img.putpixel(point, avg_color)
     return img, avg_color
 
-def draw_mask(img, scale):
+def draw_mask(img, scale, nscale):
     ori_width, ori_height = img.size
     total = (ori_height/scale) ** 2
     img_arr=[]
     img2 = Image.new('RGB',(int(ori_width/scale) * nscale, int(ori_height/scale) * nscale))
-    print()
     # for y in range(0, ori_height, scale):
     #     for x in range(0, ori_width, scale):
     #         img2, avg_color = draw_avg_color(img2,x,y,scale)
@@ -167,28 +238,10 @@ def get_color(imgdir):
     return tuple([int(i) for i in k])
 
 
-def mother_pic_init():
-    print("init mother pic")
-    ## get mother pic 
-    # mother_pic = Image.open('./pic/P_20180401_152147_vHDR_Auto_HP.jpg')
-    mother_pic = Image.open('./pic/resize3.jpg')
-    w, h = mother_pic.size
-    # if w > h:
-    #     mother_pic=resize_imgae(mother_pic, w)
-    #     length = w
-    # else:
-    #     mother_pic=resize_imgae(mother_pic, h)
-    #     length = h
-    
-    ## analize the color 要拿到打馬後的整張顏色結構 list 存
-    print("start analize....")
-    mother_pic, mother_pic_struct = draw_mask(mother_pic, mask_scale)
-    mother_pic.save('ori_blur.jpg')
-
-    return mother_pic_struct, [w,h]
 
 
-def img_process():
+
+def img_process(nscale):
     while True:
         if pro_que.empty():
             pass
@@ -197,7 +250,8 @@ def img_process():
                 imgurl = pro_que.get()
                 img = requests.get(imgurl)
                 img = Image.open(io.BytesIO(img.content))
-                img = resize_imgae(img,nscale)
+                img = resize_imgae(img, nscale)
+                # speed up calculation
                 imgtemp = resize_imgae(img, 50)
                 avg_color = calc_color_avg(imgtemp)
                 lqueue.put((img, avg_color))
@@ -265,29 +319,12 @@ def crawl2():
         driver.execute_script("var mlist = document.getElementsByClassName('photo-item__img'); for(var i=0;i<mlist.length;i+=1){mlist[i].className='done';}")
     # imglistdiv = driver.find_elements_by_class_name("photo-item__img")
 
-def thread_crawl2():
-    worker = 20
-    threads = []
-    for i in range(worker):
-        t2 = threading.Thread(target=img_process)
-        t2.daemon = True
-        threads.append(t2)
-    print("thread start")
-    for t in threads:
-        t.start()
-    while True:
-        if lqueue.qsize() > 1000 or pro_que.qsize() > 200:
-            print("crawl rest...")
-            time.sleep(5)
-        crawl2()
-
-
-def thread_crawl():
+def thread_crawl(nscale):
     global page
     worker = 20
     threads = []
     for i in range(worker):
-        t2 = threading.Thread(target=img_process)
+        t2 = threading.Thread(target=img_process, args=(nscale,))
         t2.daemon = True
         threads.append(t2)
     print("thread start")
@@ -304,21 +341,28 @@ def thread_crawl():
 
         # while pro_que.qsize() > 30:
         #     time.sleep(10)
-        
+
+
+def init_env():
+    os.system('mkdir pic/')
+    os.system('mkdir pic/stage/')
+
+
+def main(mp: Merge_Pic):
+    # open driver
     
 
-def main():
+    ## initial env
+    init_env()
+
     ## initial result img
-    mother_pic_struct, size = mother_pic_init()
-    w_len = int((size[0] / mask_scale) * nscale)
-    h_len = int((size[1] / mask_scale) * nscale)
+    result_img, mother_pic_struct = mp.mother_pic_init()
     ## init result img   
-    result_img = Image.new('RGB',(w_len,h_len))
     
   
     ## start threading crawling
 
-    t = threading.Thread(target = thread_crawl )
+    t = threading.Thread(target = thread_crawl, args=(mp.nscale,) )
     t.daemon = True
     t.start()
 
@@ -338,13 +382,13 @@ def main():
                 m_point, m_color = m_piece
                 
                 if is_color_alike(m_color, l_color):
-                    result_img.paste(limg,(m_point[0]*nscale, m_point[1]*nscale, m_point[0]*nscale + nscale, m_point[1]*nscale + nscale))
+                    result_img.paste(limg,(m_point[0]* mp.nscale, m_point[1] * mp.nscale, m_point[0]* mp.nscale + mp.nscale, m_point[1]* mp.nscale + mp.nscale))
                     mother_pic_struct.remove(m_piece)
                     print("{} left".format(len(mother_pic_struct)))
                     
                     
                     if len(mother_pic_struct) % 100 == 0:
-                        result_img.save("pic/stage/result_{}.jpg".format(str(result_stage)))
+                        result_img.save("pic/stage/{}_{}.jpg".format(mp.pic_name,str(result_stage)))
                         with open('record','w') as record:
                             record.write(json.dumps(mother_pic_struct))
                         result_stage += 1
@@ -353,84 +397,61 @@ def main():
     
     print("Done")
     result_img.save("pic/result.jpg")
-    driver.close()
+    
+    
 
 
-    ## for each matiral calc the avg color
-        ## and mapping to the mother pic
-    # mlist = list_all_img('./pic/total/')
-    # print("0% complete",end = "\r")
-    # for i,m_mask in enumerate(mother_pic_struct):
-    #     point, color = m_mask
-    #     is_match = False
-    #     for imgdir in mlist:
-    #         # limg = Image.open(imgdir,'r')
-    #         # limg = resize_imgae(limg, mask_scale)
-    #         try:
-    #             # avg_color = calc_color_avg(limg)
-    #             avg_color = get_color(imgdir)
-    #         except:
-    #             print("ERROR",imgdir)
-    #             continue
-    #         if is_color_alike(avg_color, color):
-    #             try:
-    #                 limg = Image.open(imgdir,'r')
-    #                 result_img.paste(limg,(point[0], point[1], point[0] + mask_scale, point[1]+mask_scale))
-    #                 # mlist.remove(imgdir)
-    #                 print("{}% complete".format(float(i/len(mother_pic_struct))), end="\r")
-    #                 is_match = True
-    #                 # result_img.show('test')
-    #                 break
-    #             except:
-    #                 mlist.remove(imgdir)
-    #                 pass
-    #     if is_match == False:
-    #         result_img.show('title')
-    #         result_img.save("pic/result.jpg")
-    #         raise('Not match')
-        
-    
-    
-    
-    # all_images = list_all_img('pic/total/')
-    # length = int(math.pow(len(all_images), 0.5))
-    # print(length)
-    
-    # size = 100
-    # print(length * size)
-    # img = Image.new('RGB',(length*size,length*size))
-    # for index,imgfile in enumerate(all_images):
-    #     s_img = Image.open('{}'.format(imgfile),'r')
-    #     # s_img = resize_imgae(s_img,size)
-    #     s_img.thumbnail((size, size), Image.ANTIALIAS)
-    #     print(s_img.size)
-    #     w, h = s_img.size
-    #     x = index * size % (size * length)
-    #     y = (index // length) * size
-    #     if w > h:
-    #         img.paste(s_img,(x, y + int((w-h)/2), x+w , y+h + int((w-h)/2)))
-    #     else:
-    #         img.paste(s_img,(x + int((h-w)/2), y , x+w+ int((h-w)/2) , y+h))            
-    #     print(x,y)
-        
-    # # img = Image.open("pic/1.jpg",'r')
-    # # img2 = resize_imgae(img,30)
-    # # img2.save("pic/resize.jpg")
-    # # img = draw_mask(img, 25)
-    # img.save("pic/paste.jpg")
-    
-    
-def test():
-    imgdir = './pic/total/63,62,60-9775.jpg'
-    get_color(imgdir)
-    mother_pic_struct, length = mother_pic_init()
-    print(json.dumps(mother_pic_struct))
+def print_help():
+    print("""Input args
 
-    
+option 1. A fresh start
+
+    -I <original image>
+
+
+option 2. continue from half work
+
+    -o <half work image>  
+    -r <record file>
+    """)
+
 
 if __name__ == '__main__':
     starttime = time.time()
-    main()
+    origin_path = None
+    halfwork_path = None
+    record_path = None
+    argv = sys.argv[1:]
+    try:
+      opts, args = getopt.getopt(argv,"hI:o:r:")
+    except getopt.GetoptError as e:
+        print('')
+        sys.exit(2)
+    
+    for opt, arg in opts:
+        print(opt,arg)
+        if opt == '-h':
+            print_help()
+            sys.exit()
+        elif opt in ("-I"):
+            print("Input Origin Image:", arg)
+            origin_path = arg
+        elif opt in ("-o"):
+            halfwork_path = arg
+        elif opt in ("-r"):
+            record_path = arg
+        else:
+            print_help()
+            sys.exit()
+    if origin_path is None and halfwork_path is not None and record_path is not None:
+        mp = Merge_Pic(origin_path=None, halfwork_path=halfwork_path, record_path = record_path)
+        main(mp)
+    elif origin_path is not None:
+        mp = Merge_Pic(origin_path = origin_path)
+        main(mp)
+    else:
+        print_help()
     endtime = time.time()
-    print(starttime,endtime)
-    print(endtime-starttime)
+    # print(starttime,endtime)
+    driver.close()
+    print("finish:",endtime-starttime)
