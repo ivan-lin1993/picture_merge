@@ -18,7 +18,7 @@
 
 #### Fresh Start
 Just find a picture\
-Open `config.json`
+Open `./config.json`
 
 - `nscale`
     - Output size = Input size * `nscale`
@@ -31,7 +31,7 @@ Open `config.json`
 ```
 python3.6 main.py -I <original image>
 ```
-##### `record` file will be generator while is merging
+##### `./record` file will be generator while is merging
 
 ### Continue from half work
 ```
