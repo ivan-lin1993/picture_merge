@@ -35,6 +35,15 @@ Open `./config.json`
 - `past_size`
     - The element picture size
 
+Default size
+```
+{
+    "nscale": 120,
+    "mask_scale": 20,
+    "past_size": 10
+}
+```
+## Run
 ```
 python3.6 main.py -I <original image>
 ```
