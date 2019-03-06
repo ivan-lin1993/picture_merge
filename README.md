@@ -31,7 +31,7 @@ Open `./config.json`
     - Output size = Input size * `nscale`
     - Bigger is more beautiful but need more memory to open
 - `mask_scale`
-    - Input imgae mask size
+    - Input image mask size
 - `past_size`
     - The element picture size
 
