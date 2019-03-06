@@ -1,5 +1,12 @@
 # Picture Merge
 
+### Input
+<img src="./pic/input.jpg" width='50%'>
+
+### Output
+<img src="./pic/output.jpg" width='50%'>
+
+
 ### Dependency
 - python3.5 or later
 - pipenv
@@ -38,8 +45,4 @@ python3.6 main.py -I <original image>
 python3.6 -o <half work image> -r <record file>
 ```
 ## Enjoy
-### Input
-<img src="./pic/input.jpg" width='50%'>
 
-### Output
-<img src="./pic/output.jpg" width='50%'>
