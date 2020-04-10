@@ -4,8 +4,10 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+typed-ast = ">=1.4.0"
+urllib3 = ">=1.24.2"
 requests = ">=2.20.0"
-pillow = "*"
+pillow = ">=6.2.2"
 selenium = "*"
 "beautifulsoup4" = "*"
 "html5lib" = "*"
